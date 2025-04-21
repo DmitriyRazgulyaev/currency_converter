@@ -2,20 +2,10 @@ package internal
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 )
-
-// Структура валюты с кодом и курсом
-//type Valute struct {
-//	Code string
-//	Rate float64
-//}
-
-//type Currency interface {
-//	GetCurrency()
-//	GetRate()
-//}
 
 // Структура с курсами валют на момент даты запроса для json
 type Rates struct {
@@ -30,6 +20,10 @@ func RatesRequest() (Rates, error) {
 
 	if err != nil {
 		return Rates{}, err
+	}
+
+	if resp.Body == nil {
+		panic("empty body response")
 	}
 
 	defer resp.Body.Close()
@@ -48,13 +42,13 @@ func RatesRequest() (Rates, error) {
 }
 
 // Получение курса валюты по коду
-func (r *Rates) GetRate(code string) float64 {
+func (r *Rates) GetRate(code string) (float64, error) {
 	for key, rate := range r.Rates {
 		if key == code {
-			return rate
+			return rate, nil
 		}
 	}
-	return 0
+	return 0, errors.New("code absent")
 }
 
 // Получение всех доступных валют
@@ -62,9 +56,8 @@ func (r *Rates) GetCurrency() map[string]float64 {
 	return r.Rates
 }
 
-//func ParseValute(rates []string, currency Currency) []Valute {
-//	var parsed []Valute
-//	for i, rate := range rates {
-//		parsed = append(parsed, Valute{rate, currency.Rates[rate]})
-//	}
-//}
+// Получение собственного курса выбранных валют
+func (r *Rates) GetUniqueCurrency(firstCode, secondCode string) float64 {
+	curr := r.Rates[secondCode] / r.Rates[firstCode]
+	return curr
+}
