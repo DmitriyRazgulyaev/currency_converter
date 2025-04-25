@@ -7,22 +7,23 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 )
 
-var logger = utils.Logger
-
 // Структура с курсами валют на момент даты запроса для json
-type Rates struct {
+type Currency struct {
+	Base  string             `json:"base"`
 	Date  string             `json:"date"`
 	Rates map[string]float64 `json:"rates"`
 }
 
 // Запрос к API для получения актуальных курсов валют
-func RatesRequest() (Rates, error) {
+func RatesRequest() error {
 	utils.Logger.Info("http request created")
 	resp, err := http.Get("https://www.cbr-xml-daily.ru/latest.js")
 	if err != nil {
-		return Rates{}, err
+		return err
 	}
 
 	if resp.Body == nil {
@@ -33,65 +34,98 @@ func RatesRequest() (Rates, error) {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return Rates{}, err
+		return err
 	}
 	utils.Logger.Info("response body read")
 
-	var result Rates
+	var result Currency
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		return Rates{}, err
+		return err
 	}
-	utils.Logger.Info("json unmarshalled")
+	utils.Logger.Info("json http request unmarshalled")
 
-	jsonRates, err := json.Marshal(map[string]map[string]float64{result.Date: result.Rates})
+	err = WriteToFile([]Currency{result})
 	if err != nil {
-		utils.Logger.Fatal(err.Error())
-	}
-	utils.Logger.Info("json marshalled")
-
-	_, err = WriteToFile(jsonRates)
-	if err != nil {
-		return Rates{}, err
+		return err
 	}
 	utils.Logger.Info("file written")
 
-	return result, nil
+	return nil
 }
 
-// Получение курса валюты по коду
-func (r *Rates) GetRate(code string) (float64, error) {
-	for key, rate := range r.Rates {
-		if key == code {
-			return rate, nil
+// Получение курса валюты по коду на сегодняшнюю дату,
+// если нет кода по такой дате возвращает 0, если нет такой даты - 0 и ошибку отсутствия даты
+func GetTodayRates(currencies []Currency) (map[string]float64, error) {
+	todayTime := time.Now()
+	date := strings.Split(todayTime.String(), " ")[0]
+
+	for _, curr := range currencies {
+		if curr.Date == date {
+			return curr.Rates, nil
 		}
 	}
-	return 0, errors.New("code absent")
+	return nil, errors.New("date not found")
 }
 
 // Получение всех доступных валют
-func (r *Rates) GetCurrency() map[string]float64 {
-	return r.Rates
-}
-
-// Получение собственного курса выбранных валют
-func (r *Rates) GetUniqueCurrency(firstCode, secondCode string) float64 {
-	curr := r.Rates[secondCode] / r.Rates[firstCode]
-	return curr
-}
+//func (r *Rates) GetCurrency() map[string]float64 {
+//	return r.Rates
+//}
+//
+//// Получение собственного курса выбранных валют
+//func (r *Rates) GetUniqueCurrency(firstCode, secondCode string) float64 {
+//	curr := r.Rates[secondCode] / r.Rates[firstCode]
+//	return curr
+//}
 
 // Записывает данные в файл с курсами в виде время: {курсы}, возвращает количество записанных байт
-func WriteToFile(data []byte) (int, error) {
-	file, err := os.OpenFile(utils.FILE, os.O_WRONLY, 0666)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
+func WriteToFile(data []Currency) error {
 
-	var n int
-	n, err = file.Write(data)
-	if err != nil {
-		return 0, err
+	var rates []Currency
+	err := GetJson(&rates)
+	if err != nil && err.Error() == "empty json" {
+		MarshData, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+
+		err = os.WriteFile(utils.FILE, MarshData, 0666)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
-	return n, nil
+	rates = append(rates, data...)
+	updatedRates, err := json.Marshal(rates)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(utils.FILE, updatedRates, 0666)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func GetJson(data *[]Currency) error {
+	file, err := os.ReadFile(utils.FILE)
+	if err != nil {
+		utils.Logger.Fatal(err.Error())
+	}
+	if len(file) == 0 {
+		return errors.New("empty json")
+	}
+	if !json.Valid(file) {
+		utils.Logger.Fatal("invalid JSON format")
+
+	}
+	err = json.Unmarshal(file, &data)
+	if err != nil {
+		utils.Logger.Fatal(err.Error())
+	}
+	utils.Logger.Info("getJson done successfully")
+	return nil
 }
